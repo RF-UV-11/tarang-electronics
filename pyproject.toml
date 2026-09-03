@@ -1,0 +1,25 @@
+[project]
+name = "tarang-electronics"
+version = "0.1.0"
+description = "Tarang Electronics — a fictional Indian consumer-electronics retailer, an external reference project for integrating the weave SDK"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn>=0.27.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.0",
+  "httpx>=0.27.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.setuptools]
+py-modules = ["api", "data", "onboard"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
