@@ -20,10 +20,10 @@ Every business connecting to Weave goes through the same sequence.
 `onboard.py` narrates each step explicitly as it runs; here's what each
 one means and where the code for it lives.
 
-1. **Sign up** — `CreateTenant` + `Register` an owner account. These are
-   `core`'s real public bootstrap RPCs, unauthenticated by design (there's
-   no token to present before a tenant/user exists at all). See
-   `onboard.py`'s `_step1_sign_up_and_step2_authenticate`.
+1. **Sign up** — `CreateTenant` + `Register` an owner account, via a
+   single `weave.sign_up()` call. These are `core`'s real public
+   bootstrap RPCs, unauthenticated by design (there's no token to present
+   before a tenant/user exists at all). See `onboard.py`'s `_step1_sign_up`.
 2. **Authenticate** — `Login` to get a JWT, exactly as any caller (the SDK,
    `weave/web`, or a hand-rolled integration) would.
 3. **Describe the business's systems** — `weave.connect()` then repeated
@@ -31,11 +31,30 @@ one means and where the code for it lives.
    to reason over. Each call makes a deliberate `visibility`
    (`external`/`internal`) and `category` (`general`/`analytics`)
    decision — see the comments in `onboard.py` for why each of the 8
-   tools here got the value it did.
+   tools here got the value it did. (A business with a much larger API —
+   dozens to hundreds of routes — doesn't have to hand-write one
+   `add_tool()` call per endpoint: `client.add_tools_from_openapi()`
+   registers a deliberate subset of an existing OpenAPI spec in one call.
+   Tarang's own API is small enough that hand-written calls are clearer
+   to read as a tutorial, so `onboard.py` doesn't use it, but see
+   `weave/docs/architecture/ARCHITECTURE.md` §3 for how it works.) A tool
+   can also be marked `auth_mode="user_token"` for an endpoint that must
+   be scoped to the specific signed-in customer asking (e.g. a
+   `get_my_order_history` a real electronics retailer might expose) —
+   none of Tarang's 8 tools need this (all 8 answer the same regardless
+   of *who's* asking), so `onboard.py` leaves every tool at the default
+   `auth_mode="none"`, but see `ARCHITECTURE.md` §3 for the full
+   mechanism.
 4. **Shape the bots** — `create_bot_profile()` once per distinct audience.
    Tarang has two: `external` (customers, on the `web-widget` channel,
    with guardrails against leaking supplier/cost/GST figures or another
    customer's PII) and `internal` (staff, on `slack`, sees everything).
+   Each profile can also set its own `persona` (the literal system-prompt
+   text for that bot — see `weave`'s `create_bot_profile()` docstring)
+   and choose which LLM backend generates its answers via
+   `llm_provider`/`llm_model` (defaults to orchestrator's local Ollama
+   model if left unset); this project's `onboard.py` doesn't set either,
+   relying on those defaults, but a real integrator often would.
 5. **Connect a channel** — the step this reference project intentionally
    stops short of automating, since it's specific to how *you* reach your
    users: embed `weave/web`'s chat widget on your own site pointed at the
@@ -66,12 +85,15 @@ one means and where the code for it lives.
 ## Running it
 
 Requires a sibling `weave/` checkout (this project depends on
-`weave/packages/weave-sdk` and `weave/packages/shared-clients` as a
-path dependency — see `initialize.sh` — the same way a real integrator
-would pre-release; swap for `pip install weave-sdk` once it's published,
-with zero other code changes) and weave's own stack already running
-(`core` + Mongo/Redis/Qdrant, plus `mcp-gateway` — see `weave/PLAN.md`
-and `weave/infra/`).
+`weave/packages/weave-sdk` as a path dependency — see `initialize.sh` —
+the same way a real integrator would pre-release; swap for `pip install
+weave-sdk` once it's published, with zero other code changes) and
+weave's own stack already running (`core` + Mongo/Redis/Qdrant, plus
+`mcp-gateway` — see `weave/PLAN.md` and `weave/infra/`). The `weave` SDK
+is self-contained (bundles its own generated gRPC stubs — see
+`weave/packages/weave-sdk/weave/_core_client.py`), so this is the only
+package this project needs from `weave/` — no separate
+`weave/packages/shared-clients` install step.
 
 ```bash
 ./initialize.sh              # venv, deps, proto codegen, starts api.py on :9101
@@ -95,19 +117,23 @@ save them for verification.
 ### Verifying (step 6)
 
 Using `weave/orchestrator`'s own dev harness against the tenant
-`onboard.py` just created:
+`onboard.py` just created. The owner account `onboard.py` registers has
+role `owner`, which the `external` profile's `roles_allowed` (customer
+only) correctly rejects — verify against the `internal` profile's
+`slack` channel instead:
 
 ```bash
 cd ../weave/orchestrator
 ./.venv/Scripts/python.exe dev_cli.py \
   --tenant-id <tenant_id> --email owner@tarang-electronics.test --password hunter2hunter2 \
-  --channel web-widget "What's the status of order ORD-1001?"
+  --channel slack "What's the status of order ORD-1001?"
 ```
 
-This exercises the exact `ChatStream` RPC a real `web-widget` channel
-integration would call — dynamic tool discovery, the external
-visibility filter, and guardrails all apply exactly as they would for a
-real customer.
+This exercises the exact `ChatStream` RPC a real channel integration
+would call — dynamic tool discovery and (for a real `customer`-role
+caller against the `external` profile's `web-widget` channel) the
+external visibility filter and guardrails all apply exactly as they
+would for a real customer.
 
 ## Config
 
